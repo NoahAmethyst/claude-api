@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"github.com/bincooo/claude-api"
 	"github.com/bincooo/claude-api/types"
-	"github.com/bincooo/claude-api/vars"
 	"github.com/bincooo/claude-api/util"
+	"github.com/bincooo/claude-api/vars"
 	"time"
 )
 
@@ -28,7 +28,7 @@ const (
 )
 
 func main() {
-	const (
+	var (
 		token = "sk-ant-xxx"
 	)
 	tk, err := util.Login("http://127.0.0.1:7890")
@@ -63,11 +63,13 @@ func main() {
 	fmt.Println("You: ", prompt)
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*20)
 	defer cancel()
-	partialResponse, err = chat.Reply(ctx, prompt, &types.Attachment{
-		Content:  attrCtx,
-		FileName: "paste.txt",
-		FileSize: 999999,
-		FileType: "txt",
+	partialResponse, err = chat.Reply(ctx, prompt, []types.Attachment{
+		{
+			Content:  attrCtx,
+			FileName: "paste.txt",
+			FileSize: 999999,
+			FileType: "txt",
+		},
 	})
 	if err != nil {
 		panic(err)
