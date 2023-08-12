@@ -7,6 +7,7 @@ import (
 	"github.com/bincooo/requests/url"
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
+	"math/rand"
 	"net/http"
 	"os"
 	"regexp"
@@ -18,6 +19,18 @@ import (
 var (
 	rk = ""
 	rt = ""
+
+	EmailSuffix = []string{
+		"guerrillamail.biz",
+		"guerrillamail.de",
+		"guerrillamail.net",
+		"guerrillamail.org",
+		"guerrillamail.info",
+		"guerrillamailblock.com",
+		"pokemail.net",
+		"spam4.me",
+		"grr.la",
+	}
 )
 
 const (
@@ -45,10 +58,10 @@ func loadEnvVar(key, defaultValue string) string {
 }
 
 func Login(proxy string) (string, error) {
-	return LoginFor("", proxy)
+	return LoginFor("", "", proxy)
 }
 
-func LoginFor(baseURL, proxy string) (string, error) {
+func LoginFor(baseURL, suffix, proxy string) (string, error) {
 	// validate
 	if rk == "" || rt == "" {
 		logrus.Warning("你没有提供`RECAPTCHA_KEY`、`RECAPTCHA_TOKEN`，使用内置参数；如若无法生成请在同级目录下的 .env 文件内配置 RECAPTCHA_KEY、RECAPTCHA_TOKEN 变量")
@@ -65,15 +78,32 @@ func LoginFor(baseURL, proxy string) (string, error) {
 		baseURL += "/"
 	}
 
-	email, session, err := partOne()
-	if err != nil {
-		return "", err
+	retry := 3
+	var err error
+	for {
+		retry--
+		if retry < 0 {
+			if err != nil {
+				return "", err
+			}
+			return "", errors.New("获取SessionKey失败")
+		}
+		email, session, e := partOne(suffix)
+		if e != nil {
+			err = e
+			continue
+		}
+		token, e := partTwo(baseURL, proxy, email, session)
+		if e != nil {
+			err = e
+			continue
+		}
+		return token, e
 	}
-	return partTwo(baseURL, proxy, email, session)
 }
 
 // create email
-func partOne() (string, *requests.Session, error) {
+func partOne(suffix string) (string, *requests.Session, error) {
 	response, session, err := newRequest(15*time.Second, "", http.MethodGet, "https://www.guerrillamail.com/inbox", nil, nil)
 	if err != nil {
 		return "", nil, err
@@ -86,12 +116,18 @@ func partOne() (string, *requests.Session, error) {
 	if len(matchSlice) == 0 {
 		return "", nil, errors.New("create_email error")
 	}
-	return matchSlice[0][7:], session, nil
+
+	if suffix == "" {
+		suffix = EmailSuffix[rand.Intn(len(EmailSuffix))]
+	}
+
+	email := strings.Replace(matchSlice[0][7:], "@sharklasers.com", "@"+suffix, -1)
+	return email, session, nil
 }
 
 // send_code
 func partTwo(baseURL, proxy string, email string, session *requests.Session) (string, error) {
-	response, _, err := newRequest(15*time.Second, proxy, http.MethodPost, baseURL+"api/auth/send_code", map[string]any{
+	response, _, err := newRequest(15*time.Second, proxy, http.MethodPost, baseURL+"auth/send_code", map[string]any{
 		"email_address":      email,
 		"recaptcha_site_key": rk,
 		"recaptcha_token":    rt,
@@ -118,7 +154,7 @@ func partTwo(baseURL, proxy string, email string, session *requests.Session) (st
 
 // 注册成功，返回token
 func partFour(baseURL, code string, email string, proxy string) (string, error) {
-	response, _, err := newRequest(15*time.Second, proxy, http.MethodPost, baseURL+"api/auth/verify_code", map[string]any{
+	response, _, err := newRequest(15*time.Second, proxy, http.MethodPost, baseURL+"auth/verify_code", map[string]any{
 		"code":               code,
 		"email_address":      email,
 		"recaptcha_site_key": rk,
@@ -159,6 +195,10 @@ func partThree(email string, session *requests.Session) (string, error) {
 			session)
 		if err != nil {
 			return "", err
+		}
+
+		if response.StatusCode != 200 {
+			return "", errors.New("[FetchError]: " + response.Text)
 		}
 
 		json, err := response.Json()
